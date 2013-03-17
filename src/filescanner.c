@@ -67,6 +67,8 @@ static dispatch_source_t ino_src;
 time_t last_seen;  
 int skip_count;
 char skiptype[30][6];
+int db_rebuild; 
+int has_started;
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 struct stacked_dir {
@@ -290,15 +292,6 @@ process_media_file(char *file, time_t mtime, off_t size, int compilation)
   int ret;
   int i;
   int stc;
-  /*
-  cfg_t *lib;
-  int skip_count;
-  int i;
-  char *skiptype;
-  lib = cfg_getsec(cfg, "library");
- 
-  skip_count = cfg_size(lib, "always_skip");
- */
   ext = strrchr(file, '.');
   if (skip_count > 0)
     {
@@ -635,7 +628,7 @@ process_directory(char *path, int flags)
 	}
 
       if (S_ISREG(sb.st_mode))
-	process_file(entry, sb.st_mtime, sb.st_size, compilation, flags);
+	if(has_started==1)  process_file(entry, sb.st_mtime, sb.st_size, compilation, flags);
       else if (S_ISDIR(sb.st_mode))
 	process_directory_async(entry, flags);
       else
@@ -764,22 +757,20 @@ bulk_scan(void)
   char *deref;
   time_t start;
   int i;
-  int db_rebuild; 
+ 
   db_rebuild = cfg_getint(cfg_getsec(cfg, "library"), "db_rebuild");
   DPRINTF(E_LOG, L_SCAN, " DB Rebuild is set tp %i \n",db_rebuild);
-  if(db_rebuild>1) return;
-
-	lib = cfg_getsec(cfg, "library");
-	skip_count = cfg_size(lib, "always_skip");
-
-		if (skip_count > 0)
-		{
-		  for (i = 0; i < skip_count; i++)
-		{
-		  strcpy(skiptype[i],cfg_getnstr(lib, "always_skip", i)); 
-		}
+  
+  lib = cfg_getsec(cfg, "library");
+  skip_count = cfg_size(lib, "always_skip");
+  if (skip_count > 0)
+	{
+	  for (i = 0; i < skip_count; i++)
+	{
+	  strcpy(skiptype[i],cfg_getnstr(lib, "always_skip", i)); 
 	}
-
+  }
+  
   start = time(NULL);
   last_seen=time(NULL);
   DPRINTF(E_LOG, L_SCAN, " Last Seen set to  %i \n",last_seen);
@@ -799,7 +790,7 @@ bulk_scan(void)
 	  continue;
 	}
 
-      process_directory_async(deref, F_SCAN_BULK | F_SCAN_NODUP);
+     process_directory_async(deref, F_SCAN_BULK | F_SCAN_NODUP);
     }
 
   /* Wait for the scanner group to be empty, then queue db_purge_cruft()
@@ -852,9 +843,9 @@ bulk_scan(void)
 static void
 startup_task(void *arg)
 {
-  int ret;
-
+  int ret;  
   ret = db_pool_get();
+  has_started=0;
   if (ret < 0)
     {
       DPRINTF(E_LOG, L_SCAN, "Startup failed: could not acquire database connection\n");
@@ -883,9 +874,9 @@ startup_task(void *arg)
    * It will also rebuild the groups we just cleared.
    */
   db_files_update_songalbumid();
-
+  if (db_rebuild <2) has_started=1;
   bulk_scan();
-
+  has_started=1;
  startup_fail:
   db_pool_release();
 }
@@ -1082,7 +1073,7 @@ process_inotify_file(struct watch_info *wi, char *path, struct inotify_event *ie
 
       compilation = check_compilation(path);
 
-      process_file(file, sb.st_mtime, sb.st_size, compilation, 0);
+      if(has_started==1)  process_file(file, sb.st_mtime, sb.st_size, compilation, 0);
 
       if (deref)
 	free(deref);
