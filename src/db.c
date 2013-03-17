@@ -625,19 +625,43 @@ db_purge_cruft(time_t ref)
 {
   char *errmsg;
   int i;
-  int ret;
-  char *queries[3] = { NULL, NULL, NULL };
-  char *queries_tmpl[3] =
-    {
-      "DELETE FROM playlistitems WHERE playlistid IN (SELECT id FROM playlists p WHERE p.type <> 1 AND p.db_timestamp < %" PRIi64 ");",
-      "DELETE FROM playlists WHERE type <> 1 AND db_timestamp < %" PRIi64 ";",
-      "DELETE FROM files WHERE db_timestamp < %" PRIi64 ";"
-    };
-
-  if (sizeof(queries) != sizeof(queries_tmpl))
-    {
-      DPRINTF(E_LOG, L_DB, "db_purge_cruft(): queries out of sync with queries_tmpl\n");
-      return;
+  int ret; 
+  int db_rebuild; 
+  cfg_t *lib;
+  char *queries_tmpl[3]; 
+  char *queries[3]; 
+  db_rebuild = cfg_getint(cfg_getsec(cfg, "library"), "db_rebuild");
+  DPRINTF(E_LOG, L_DB, "db_rebuild set to %i \n",db_rebuild);
+  
+  switch(db_rebuild)
+  {
+	  case 0:
+			queries_tmpl[0] = "DELETE FROM playlistitems WHERE playlistid IN (SELECT id FROM playlists p WHERE p.type <> 1 AND p.db_timestamp < %" PRIi64 ");";
+			queries_tmpl[1] = "DELETE FROM playlists WHERE type <> 1 AND db_timestamp < %" PRIi64 ";";
+			queries_tmpl[2] = "DELETE FROM files WHERE db_timestamp < %" PRIi64 ";";
+		break;
+ 	  case 1:
+		   queries_tmpl[0] = "DELETE FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		   queries_tmpl[1] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		   queries_tmpl[2] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		break;
+    	  case 2:
+		   queries_tmpl[0] = "DELETE FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		   queries_tmpl[1] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		   queries_tmpl[2] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		  break;
+		  
+        case 3:
+		   queries_tmpl[0] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		   queries_tmpl[1] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		   queries_tmpl[2] = "SELECT count (*) FROM files where disabled != 0 AND db_timestamp <> %" PRIi64 ";";
+		break  ;
+		
+		default:
+			queries_tmpl[0] = "DELETE FROM playlistitems WHERE playlistid IN (SELECT id FROM playlists p WHERE p.type <> 1 AND p.db_timestamp < %" PRIi64 ");";
+			queries_tmpl[1] = "DELETE FROM playlists WHERE type <> 1 AND db_timestamp < %" PRIi64 ";";
+			queries_tmpl[2] = "DELETE FROM files WHERE db_timestamp < %" PRIi64 ";";
+		break;
     }
 
   for (i = 0; i < (sizeof(queries_tmpl) / sizeof(queries_tmpl[0])); i++)
@@ -1168,16 +1192,16 @@ db_build_query_browse(struct query_params *qp, char *field, char **q)
 
   if (idx && qp->filter)
     query = sqlite3_mprintf("SELECT DISTINCT f.%s, f.%s FROM files f WHERE f.data_kind = 0 AND f.disabled = 0 AND f.%s != ''"
-			    " AND %s %s;", field, field, field, qp->filter, idx);
+			   " AND %s ORDER BY f.%s %s;", field, field, field, qp->filter, field, idx);
   else if (idx)
     query = sqlite3_mprintf("SELECT DISTINCT f.%s, f.%s FROM files f WHERE f.data_kind = 0 AND f.disabled = 0 AND f.%s != ''"
-			    " %s;", field, field, field, idx);
+			      " ORDER BY f.%s %s;", field, field, field, field, idx);
   else if (qp->filter)
     query = sqlite3_mprintf("SELECT DISTINCT f.%s, f.%s FROM files f WHERE f.data_kind = 0 AND f.disabled = 0 AND f.%s != ''"
-			    " AND %s;", field, field, field, qp->filter);
+			   " AND %s ORDER BY f.%s;", field, field, field, qp->filter, field);
   else
-    query = sqlite3_mprintf("SELECT DISTINCT f.%s, f.%s FROM files f WHERE f.data_kind = 0 AND f.disabled = 0 AND f.%s != ''",
-			    field, field, field);
+     query = sqlite3_mprintf("SELECT DISTINCT f.%s, f.%s FROM files f WHERE f.data_kind = 0 AND f.disabled = 0 AND f.%s != '' ORDER BY f.%s",
+           field, field, field, field);
 
   if (!query)
     {
@@ -1594,14 +1618,14 @@ db_file_inc_playcount(int id)
 }
 
 void
-db_file_ping(int id)
+db_file_ping(int id,time_t last_seen)
 {
 #define Q_TMPL "UPDATE files SET db_timestamp = %" PRIi64 ", disabled = 0 WHERE id = %d;"
   char *query;
   char *errmsg;
   int ret;
 
-  query = sqlite3_mprintf(Q_TMPL, (int64_t)time(NULL), id);
+  query = sqlite3_mprintf(Q_TMPL, (int64_t)last_seen, id);
   if (!query)
     {
       DPRINTF(E_LOG, L_DB, "Out of memory for query string\n");
@@ -1653,7 +1677,7 @@ db_file_path_byid(int id)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 
@@ -1702,7 +1726,7 @@ db_file_id_byquery(char *query)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 
@@ -1851,7 +1875,7 @@ db_file_stamp_bypath(char *path, time_t *stamp, int *id)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 
@@ -1915,7 +1939,7 @@ db_file_fetch_byquery(char *query)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 
@@ -2410,7 +2434,7 @@ db_pl_id_bypath(char *path, int *id)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 
@@ -2473,7 +2497,7 @@ db_pl_fetch_byquery(char *query)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 
@@ -2992,7 +3016,7 @@ db_group_type_byid(int id)
   if (ret != SQLITE_ROW)
     {
       if (ret == SQLITE_DONE)
-	DPRINTF(E_INFO, L_DB, "No results\n");
+	DPRINTF(E_INFO, L_DB, "No results %s\n", query);
       else
 	DPRINTF(E_LOG, L_DB, "Could not step: %s\n", sqlite3_errmsg(pool_hdl->hdl));
 

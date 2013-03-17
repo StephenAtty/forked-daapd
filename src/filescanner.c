@@ -64,7 +64,9 @@ static dispatch_group_t scanner_grp;
 static dispatch_queue_t deferred_pl_sq;
 static int ino_fd;
 static dispatch_source_t ino_src;
-
+time_t last_seen;  
+int skip_count;
+char skiptype[30][6];
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 struct stacked_dir {
@@ -286,12 +288,36 @@ process_media_file(char *file, time_t mtime, off_t size, int compilation)
   time_t stamp;
   int id;
   int ret;
+  int i;
+  int stc;
+  /*
+  cfg_t *lib;
+  int skip_count;
+  int i;
+  char *skiptype;
+  lib = cfg_getsec(cfg, "library");
+ 
+  skip_count = cfg_size(lib, "always_skip");
+ */
+  ext = strrchr(file, '.');
+  if (skip_count > 0)
+    {
+      for (i = 0; i < skip_count; i++)
+	{
 
+	if(ext && skiptype[i]) stc=strcasecmp(ext,skiptype[i]);
+ 	  if  (stc == 0)
+	    {
+	      DPRINTF(E_LOG, L_SCAN, "Excluding file : %s \n",file);
+	      return ;
+	    } 
+	}
+    }
   db_file_stamp_bypath(file, &stamp, &id);
 
   if (stamp >= mtime)
     {
-      db_file_ping(id);
+      db_file_ping(id,last_seen);
       return;
     }
 
@@ -738,9 +764,26 @@ bulk_scan(void)
   char *deref;
   time_t start;
   int i;
+  int db_rebuild; 
+  db_rebuild = cfg_getint(cfg_getsec(cfg, "library"), "db_rebuild");
+  DPRINTF(E_LOG, L_SCAN, " DB Rebuild is set tp %i \n",db_rebuild);
+  if(db_rebuild>1) return;
+
+	lib = cfg_getsec(cfg, "library");
+	skip_count = cfg_size(lib, "always_skip");
+
+		if (skip_count > 0)
+		{
+		  for (i = 0; i < skip_count; i++)
+		{
+		  strcpy(skiptype[i],cfg_getnstr(lib, "always_skip", i)); 
+		}
+	}
 
   start = time(NULL);
-
+  last_seen=time(NULL);
+  DPRINTF(E_LOG, L_SCAN, " Last Seen set to  %i \n",last_seen);
+  
   lib = cfg_getsec(cfg, "library");
 
   ndirs = cfg_size(lib, "directories");
@@ -786,7 +829,7 @@ bulk_scan(void)
 					     }
 
 					   DPRINTF(E_DBG, L_SCAN, "Purging old database content\n");
-					   db_purge_cruft(start);
+					   db_purge_cruft(last_seen);
 
 					   db_hook_post_scan();
 

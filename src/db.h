@@ -326,7 +326,7 @@ void
 db_file_inc_playcount(int id);
 
 void
-db_file_ping(int id);
+db_file_ping(int id,time_t last_seen);
 
 char *
 db_file_path_byid(int id);
