@@ -297,15 +297,15 @@ process_media_file(char *file, time_t mtime, off_t size, int compilation)
     {
       for (i = 0; i < skip_count; i++)
 	{
-
-	if(ext && skiptype[i]) stc=strcasecmp(ext,skiptype[i]);
- 	  if  (stc == 0)
-	    {
-	      DPRINTF(E_LOG, L_SCAN, "Excluding file : %s \n",file);
-	      return ;
-	    } 
-	}
+		if(ext && skiptype[i]) stc=strcasecmp(ext,skiptype[i]);
+	 	  if  (stc == 0)
+			{
+				DPRINTF(E_LOG, L_SCAN, "Excluding file : %s (%s) \n",file,ext);
+				return ;
+			}	 
+		}	
     }
+    
   db_file_stamp_bypath(file, &stamp, &id);
 
   if (stamp >= mtime)
@@ -506,7 +506,7 @@ process_file(char *file, time_t mtime, off_t size, int compilation, int flags)
     }
 
   /* Not any kind of special file, so let's see if it's a media file */
-  process_media_file(file, mtime, size, compilation);
+  if (has_started>=1) process_media_file(file, mtime, size, compilation);
 }
 
 
@@ -626,13 +626,12 @@ process_directory(char *path, int flags)
 	      continue;
 	    }
 	}
-
-      if (S_ISREG(sb.st_mode))
-	if(has_started==1)  process_file(entry, sb.st_mtime, sb.st_size, compilation, flags);
-      else if (S_ISDIR(sb.st_mode))
-	process_directory_async(entry, flags);
-      else
-	DPRINTF(E_LOG, L_SCAN, "Skipping %s, not a directory, symlink nor regular file\n", entry);
+	   		  if (S_ISREG(sb.st_mode)) {
+			if (has_started>=1) process_file(entry, sb.st_mtime, sb.st_size, compilation, flags); }
+		  else if (S_ISDIR(sb.st_mode))
+	 	process_directory_async(entry, flags);
+		  else
+		DPRINTF(E_LOG, L_SCAN, "Skipping %s, not a directory, symlink nor regular file\n", entry);
     }
 
   closedir(dirp);
@@ -657,7 +656,7 @@ process_directory(char *path, int flags)
       wi.cookie = 0;
       wi.path = path;
 
-      db_watch_add(&wi);
+      if ( db_rebuild < 3 ) db_watch_add(&wi);
     }
 
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
@@ -686,7 +685,7 @@ process_directory(char *path, int flags)
   wi.cookie = 0;
   wi.path = path;
 
-  db_watch_add(&wi);
+   if ( db_rebuild < 3 ) db_watch_add(&wi);
 #endif
 }
 
@@ -757,10 +756,7 @@ bulk_scan(void)
   char *deref;
   time_t start;
   int i;
- 
-  db_rebuild = cfg_getint(cfg_getsec(cfg, "library"), "db_rebuild");
-  DPRINTF(E_LOG, L_SCAN, " DB Rebuild is set tp %i \n",db_rebuild);
-  
+
   lib = cfg_getsec(cfg, "library");
   skip_count = cfg_size(lib, "always_skip");
   if (skip_count > 0)
@@ -821,7 +817,8 @@ bulk_scan(void)
 
 					   DPRINTF(E_DBG, L_SCAN, "Purging old database content\n");
 					   db_purge_cruft(last_seen);
-
+						has_started=1; 
+						DPRINTF(E_DBG, L_SCAN, "Has Started now set to 1 \n");
 					   db_hook_post_scan();
 
 					   db_pool_release();
@@ -874,9 +871,12 @@ startup_task(void *arg)
    * It will also rebuild the groups we just cleared.
    */
   db_files_update_songalbumid();
-  if (db_rebuild <2) has_started=1;
+   
+  db_rebuild = cfg_getint(cfg_getsec(cfg, "library"), "db_rebuild");
+  DPRINTF(E_LOG, L_SCAN, " DB Rebuild is set to %i \n",db_rebuild);
+  
+  if (db_rebuild <=1) has_started=1;
   bulk_scan();
-  has_started=1;
  startup_fail:
   db_pool_release();
 }
@@ -1072,8 +1072,7 @@ process_inotify_file(struct watch_info *wi, char *path, struct inotify_event *ie
 	}
 
       compilation = check_compilation(path);
-
-      if(has_started==1)  process_file(file, sb.st_mtime, sb.st_size, compilation, 0);
+         if (has_started>=1) process_file(file, sb.st_mtime, sb.st_size, compilation, 0);
 
       if (deref)
 	free(deref);
