@@ -1799,6 +1799,13 @@ raop_session_make(struct raop_device *rd, int family, raop_status_cb cb)
 	rs->auth_quirk_itunes = 0;
 	rs->wants_metadata = 1;
 	break;
+
+	case OTHER:
+	rs->encrypt = 0;
+	rs->auth_quirk_itunes = 0;
+	rs->wants_metadata = 0;
+	break;
+
     }
 
   rs->devname = strdup(rd->name);

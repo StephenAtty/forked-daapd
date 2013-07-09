@@ -44,7 +44,7 @@
 
 static const char *cover_basename[] =
   {
-    "artwork", "cover",
+    "artwork", "cover", "folder","front",
   };
 
 static const char *cover_extension[] =
