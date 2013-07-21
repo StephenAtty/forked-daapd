@@ -133,6 +133,7 @@ expr	returns [ pANTLR3_STRING result, int valid ]
 
 			val = field;
 			while ((*val != '\0') && ((*val == '.')
+			    || (*val == '-')
 				|| ((*val >= 'a') && (*val <= 'z'))
 				|| ((*val >= 'A') && (*val <= 'Z'))
 				|| ((*val >= '0') && (*val <= '9'))))
@@ -297,9 +298,9 @@ expr	returns [ pANTLR3_STRING result, int valid ]
 
 			if (!dqfm->as_int)
 				$result->append8($result, "'");
-	
+
 			$result->append8($result, (const char *)val);
-	
+
 			if (!dqfm->as_int)
 				$result->append8($result, "'");
 
